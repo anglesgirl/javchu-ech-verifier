@@ -1,14 +1,14 @@
 plugins {
-    id("com.android.application") version "8.2.2"
-    id("org.jetbrains.kotlin.android") version "1.9.22"
+    alias(libs.plugins.com.android.application)
+    alias(libs.plugins.org.jetbrains.kotlin.android)
 }
 android {
     namespace = "com.test.verifier"
-    compileSdk = 34
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.test.verifier"
         minSdk = 27
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
     }
@@ -20,4 +20,5 @@ android {
 }
 dependencies {
     implementation("org.json:json:20240303")
+    implementation("androidx.appcompat:appcompat:1.7.0")
 }
