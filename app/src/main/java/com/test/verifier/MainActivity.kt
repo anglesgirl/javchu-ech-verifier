@@ -49,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         siteSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, sites.map { it.name })
         urlInput = EditText(this).apply { setSingleLine(); hint = "登录页地址" }
         val btnEchLoad = Button(this).apply { text = "ECH加载登录页"; setOnClickListener { echLoad() } }
+        val btnDirectLoad = Button(this).apply { text = "直连加载(对比)"; setOnClickListener { directLoad() } }
         val btnExtract = Button(this).apply { text = "提取 Cookie (ECH同步)"; setOnClickListener { extractCookie() } }
         val btnShare = Button(this).apply { text = "导出 Cookie.txt"; setOnClickListener { shareCookie() } }
         val btnCopy = Button(this).apply { text = "复制 Cookie"; setOnClickListener { copyCookie() } }
@@ -74,6 +75,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(siteSpinner)
         root.addView(urlInput)
         root.addView(btnEchLoad)
+        root.addView(btnDirectLoad)
         root.addView(btnExtract)
         root.addView(btnShare)
         root.addView(btnCopy)
@@ -110,6 +112,41 @@ class MainActivity : AppCompatActivity() {
         else -> "https://tgxjjdszvu.cloudflare-gateway.com/dns-query"
     }
     private fun dohResolve(): String = "tgxjjdszvu.cloudflare-gateway.com:443:162.159.36.20,162.159.36.5,2606:4700:54::a29f:2407,2606:4700:5c::a29f:2e07"
+
+    private fun directLoad() {
+        val site = currentSite()
+        preview.text = "直连 GET ${site.url} ..."
+        log("直连请求 ${site.url}")
+        Thread {
+            try {
+                val url = java.net.URL(site.url)
+                val conn = (url.openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36")
+                    setRequestProperty("Accept", "text/html,application/xhtml+xml")
+                    connectTimeout = 15000; readTimeout = 15000
+                    instanceFollowRedirects = false
+                }
+                val code = conn.responseCode
+                val headers = conn.headerFields
+                val setCookies = headers.entries.filter { it.key?.equals("set-cookie", true) == true }.flatMap { it.value }
+                val loc = conn.getHeaderField("Location") ?: ""
+                val stream = if (code in 200..399) conn.inputStream else conn.errorStream
+                val html = stream?.bufferedReader()?.readText()?.take(2000) ?: ""
+                runOnUiThread {
+                    try { syncCookiesToWebView(site, setCookies) } catch (_: Throwable) {}
+                    log("直连 GET $code loc=$loc set-cookie=${setCookies.size}")
+                    log("直连 Set-Cookie: ${setCookies.joinToString(" | ") { it.take(120) }}")
+                    log("直连预览: ${html.take(600).replace("\n"," ")}")
+                    preview.text = "直连 GET $code set-cookie=${setCookies.size} ${if (loc.isNotBlank()) "loc=$loc" else ""}"
+                    // 渲染直连HTML以对比
+                    try { webView.loadDataWithBaseURL(site.url, html, "text/html", "utf-8", null) } catch (_: Throwable) {}
+                }
+            } catch (e: Throwable) {
+                runOnUiThread { preview.text = "直连失败 ${e::class.simpleName}:${e.message}"; log("直连异常 ${e.message}") }
+            }
+        }.start()
+    }
 
     private fun echLoad() {
         val site = currentSite()
