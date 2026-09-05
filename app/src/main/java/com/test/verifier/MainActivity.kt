@@ -22,6 +22,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.liar.han1meplus.EchHttpClient
 import java.io.File
 import java.net.URLDecoder
 import java.net.URLEncoder
