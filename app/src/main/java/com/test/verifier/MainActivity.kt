@@ -48,7 +48,10 @@ class MainActivity : AppCompatActivity() {
         siteSpinner = Spinner(this)
         siteSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, sites.map { it.name })
         urlInput = EditText(this).apply { setSingleLine(); hint = "登录页地址" }
+        val emailInput = EditText(this).apply { setSingleLine(); hint = "邮箱 (anglesgirlcn@gmail.com)"; setText("anglesgirlcn@gmail.com") }
+        val passwordInput = EditText(this).apply { setSingleLine(); hint = "密码"; inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD; setText("Ab1234610") }
         val btnEchLoad = Button(this).apply { text = "ECH加载登录页"; setOnClickListener { echLoad() } }
+        val btnNativeLogin = Button(this).apply { text = "JNI原生ECH登录"; setOnClickListener { nativeEchLogin(emailInput.text.toString(), passwordInput.text.toString()) } }
         val btnDirectLoad = Button(this).apply { text = "直连加载(对比)"; setOnClickListener { directLoad() } }
         val btnExtract = Button(this).apply { text = "提取 Cookie (ECH同步)"; setOnClickListener { extractCookie() } }
         val btnShare = Button(this).apply { text = "导出 Cookie.txt"; setOnClickListener { shareCookie() } }
@@ -74,7 +77,10 @@ class MainActivity : AppCompatActivity() {
         siteSpinner.onItemSelectedListener = SimpleItemSelected { urlInput.setText(sites[it].url) }
         root.addView(siteSpinner)
         root.addView(urlInput)
+        root.addView(emailInput)
+        root.addView(passwordInput)
         root.addView(btnEchLoad)
+        root.addView(btnNativeLogin)
         root.addView(btnDirectLoad)
         root.addView(btnExtract)
         root.addView(btnShare)
@@ -112,6 +118,72 @@ class MainActivity : AppCompatActivity() {
         else -> "https://tgxjjdszvu.cloudflare-gateway.com/dns-query"
     }
     private fun dohResolve(): String = "tgxjjdszvu.cloudflare-gateway.com:443:162.159.36.20,162.159.36.5,2606:4700:54::a29f:2407,2606:4700:5c::a29f:2e07"
+
+    private fun nativeEchLogin(email: String, password: String) {
+        if (email.isBlank() || password.isBlank()) { Toast.makeText(this, "请填邮箱密码", Toast.LENGTH_SHORT).show(); return }
+        val site = currentSite()
+        preview.text = "JNI原生登录 ${site.host} ..."
+        log("原生登录发起 ${site.url} email=${email.take(3)}***")
+        Thread {
+            try {
+                // 1. ECH GET 拿 _token + XSRF
+                val initCk = try { CookieManager.getInstance().getCookie(site.url).orEmpty() } catch (_: Exception) { "" }
+                val getHeaders = mutableMapOf(
+                    "User-Agent" to "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36",
+                    "Accept" to "text/html,application/xhtml+xml",
+                    "Accept-Language" to "zh-CN,zh;q=0.9",
+                )
+                if (initCk.isNotBlank()) getHeaders["Cookie"] = initCk
+                val getResp = EchHttpClient.execute("GET", site.url, getHeaders, null, dohFor(site.host), dohResolve())
+                val getCookies = getResp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
+                runOnUiThread { try { syncCookiesToWebView(site, getCookies) } catch (_: Throwable) {} }
+                val html = getResp.body.toString(Charsets.UTF_8)
+                val token = Regex("""name="_token"\s+value="([^"]+)"""").find(html)?.groupValues?.get(1)
+                    ?: Regex("""name='_token'\s+value='([^']+)'""").find(html)?.groupValues?.get(1)
+                    ?: Regex("""csrf-token"\s+content="([^"]+)"""").find(html)?.groupValues?.get(1)
+                if (token.isNullOrBlank()) {
+                    runOnUiThread { preview.text = "未找到 _token，GET长度 ${html.length}"; log("GET html预览 ${html.take(500).replace("\n"," ")}") }
+                    return@Thread
+                }
+                log("GET token=${token.take(8)}*** set-cookie=${getCookies.size} ech=${getResp.echStatus}")
+                // 同步后重读Cookie，保证 XSRF 与 token 同轮
+                val ck = try { CookieManager.getInstance().getCookie("https://${site.host}/").orEmpty() } catch (_: Exception) { "" }
+                // 2. ECH POST 直发
+                val body = "_token=${URLEncoder.encode(token,"UTF-8")}&email=${URLEncoder.encode(email,"UTF-8")}&password=${URLEncoder.encode(password,"UTF-8")}"
+                val postHeaders = mutableMapOf(
+                    "User-Agent" to "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36",
+                    "Content-Type" to "application/x-www-form-urlencoded",
+                    "Accept" to "text/html,application/xhtml+xml",
+                    "Origin" to "https://${site.host}",
+                    "Referer" to site.url,
+                )
+                if (ck.isNotBlank()) postHeaders["Cookie"] = ck
+                log("原生POST bodyLen=${body.length} CookieLen=${ck.length}")
+                val postResp = EchHttpClient.execute("POST", site.url, postHeaders, body.toByteArray(), dohFor(site.host), dohResolve())
+                val postCookies = postResp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
+                val postHtml = postResp.body.toString(Charsets.UTF_8)
+                val lower = postHtml.lowercase()
+                val hit = when {
+                    lower.contains("page expired") || lower.contains("419") -> "419"
+                    lower.contains("登入") -> "仍在登录页"
+                    else -> "已登录或302"
+                }
+                runOnUiThread {
+                    try { syncCookiesToWebView(site, postCookies) } catch (_: Throwable) {}
+                    log("原生POST ${postResp.statusCode} ech=${postResp.echStatus} set-cookie=${postCookies.size} 判定=$hit")
+                    log("原生POST Set-Cookie: ${postCookies.joinToString(" | ") { it.take(120) }}")
+                    log("原生POST预览: ${postHtml.take(800).replace("\n"," ")}")
+                    preview.text = "原生POST ${postResp.statusCode} $hit set-cookie=${postCookies.size} ech=${postResp.echStatus}"
+                    try { webView.loadDataWithBaseURL(site.url, postHtml, "text/html", "utf-8", null) } catch (_: Throwable) {}
+                    extractCookie()
+                }
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                val logs = try { EchHttpClient.logs().takeLast(15).joinToString("\n") } catch (_: Throwable) { "" }
+                runOnUiThread { preview.text = "原生登录失败 ${e::class.simpleName}:${e.message}\n${logs.take(600)}"; log("原生异常 ${e.message}") }
+            }
+        }.start()
+    }
 
     private fun directLoad() {
         val site = currentSite()
