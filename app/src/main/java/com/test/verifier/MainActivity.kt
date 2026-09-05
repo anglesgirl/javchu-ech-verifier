@@ -284,6 +284,31 @@ class MainActivity : AppCompatActivity() {
                     val previewHtml = html.replace("\n"," ").replace("\r"," ").take(1500).takeLast(800)
                     val echOk = resp.echStatus.contains("accepted", true)
                     val location = resp.headers.entries.firstOrNull { it.key.equals("location", true) }?.value?.firstOrNull().orEmpty()
+                    // 直连对比（同body同Cookie，不走ECH）
+                    try {
+                        val directConn = (java.net.URL(target).openConnection() as java.net.HttpURLConnection).apply {
+                            requestMethod = "POST"
+                            doOutput = true
+                            setRequestProperty("User-Agent", headers["User-Agent"])
+                            setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                            setRequestProperty("Accept", headers["Accept"] ?: "")
+                            setRequestProperty("Origin", headers["Origin"] ?: "")
+                            setRequestProperty("Referer", headers["Referer"] ?: "")
+                            if (ckCopy.isNotBlank()) setRequestProperty("Cookie", ckCopy)
+                            connectTimeout = 15000; readTimeout = 15000
+                            instanceFollowRedirects = false
+                        }
+                        directConn.outputStream.use { it.write(body.toByteArray()) }
+                        val dCode = directConn.responseCode
+                        val dLoc = directConn.getHeaderField("Location") ?: ""
+                        val dCookies = directConn.headerFields.entries.filter { it.key?.equals("set-cookie", true) == true }.flatMap { it.value }
+                        val dStream = if (dCode in 200..399) directConn.inputStream else directConn.errorStream
+                        val dHtml = dStream?.bufferedReader()?.readText()?.take(1500) ?: ""
+                        val dHit = if (dHtml.lowercase().contains("419")) "419" else if (dHtml.contains("登入")) "仍在登录页" else "code $dCode"
+                        log("直连POST $dCode loc=$dLoc set-cookie=${dCookies.size} 判定=$dHit")
+                        log("直连POST Set-Cookie: ${dCookies.joinToString(" | ") { it.take(120) }}")
+                        log("直连POST预览: ${dHtml.take(500).replace("\n"," ")}")
+                    } catch (e: Throwable) { log("直连POST异常 ${e::class.simpleName}:${e.message}") }
                     runOnUiThread {
                         try { syncCookiesToWebView(siteCopy, setCookies) } catch (e: Throwable) { log("POST同步异常 ${e.message}") }
                         log("POST ${resp.statusCode} ech=${resp.echStatus} loc=$location set-cookie=${setCookies.size} bodyLen=${body.length} 判定=$hit")
