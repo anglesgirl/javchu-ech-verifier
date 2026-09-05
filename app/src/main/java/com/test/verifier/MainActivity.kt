@@ -268,17 +268,27 @@ class MainActivity : AppCompatActivity() {
                         "Referer" to siteCopy.url,
                     )
                     if (ckCopy.isNotBlank()) headers["Cookie"] = ckCopy
-                    log("ECH POST $target bodyLen=${body.length}")
+                    log("ECH POST $target bodyLen=${body.length} CookieLen=${ckCopy.length} CookieHead=${ckCopy.take(80)}")
+                    log("ECH POST body=${body}")
                     val resp = EchHttpClient.execute("POST", target, headers, body.toByteArray(), dohFor(siteCopy.host), dohResolve())
                     val setCookies = resp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
                     val html = resp.body.toString(Charsets.UTF_8)
-                    val previewHtml = html.take(800).replace("\n"," ").take(800)
+                    val bodyLower = html.lowercase()
+                    val hit = when {
+                        bodyLower.contains("auth.failed") -> "auth.failed"
+                        bodyLower.contains("419") || bodyLower.contains("page expired") -> "419"
+                        bodyLower.contains("登入帳戶") || bodyLower.contains("登入") -> "仍在登录页"
+                        bodyLower.contains("個人") || bodyLower.contains("登出") || bodyLower.contains("logout") -> "已登录"
+                        else -> "未知"
+                    }
+                    val previewHtml = html.replace("\n"," ").replace("\r"," ").take(1500).takeLast(800)
                     val echOk = resp.echStatus.contains("accepted", true)
                     val location = resp.headers.entries.firstOrNull { it.key.equals("location", true) }?.value?.firstOrNull().orEmpty()
                     runOnUiThread {
                         try { syncCookiesToWebView(siteCopy, setCookies) } catch (e: Throwable) { log("POST同步异常 ${e.message}") }
-                        log("POST ${resp.statusCode} ech=${resp.echStatus} loc=$location set-cookie=${setCookies.size} bodyLen=${body.length}")
+                        log("POST ${resp.statusCode} ech=${resp.echStatus} loc=$location set-cookie=${setCookies.size} bodyLen=${body.length} 判定=$hit")
                         log("POST回包预览: $previewHtml")
+                        log("POST回包判定: $hit | 含登入=${bodyLower.contains("登入")} 含419=${bodyLower.contains("419")} 长度=${html.length}")
                         log("POST Set-Cookie: ${setCookies.joinToString(" | ") { it.take(120) }}")
                         if (!echOk) {
                             preview.text = "ECH POST未接受 fail-closed\n${resp.echStatus}"
