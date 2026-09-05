@@ -190,6 +190,7 @@ class MainActivity : AppCompatActivity() {
                     const fd=new FormData(form);
                     const pairs=[];
                     for(const [k,v] of fd.entries()) pairs.push(encodeURIComponent(k)+'='+encodeURIComponent(v));
+                    if(!pairs.some(p=>p.startsWith('remember='))) pairs.push('remember=1');
                     const body=pairs.join('&');
                     const action=form.action || location.href;
                     ECH.postLogin(JSON.stringify({url:action, body:body, html:document.documentElement.outerHTML.substring(0,2000)}));
