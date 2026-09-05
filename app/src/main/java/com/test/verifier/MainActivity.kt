@@ -186,25 +186,43 @@ class MainActivity : AppCompatActivity() {
                     preview.text = "原生POST ${postResp.statusCode} $hit set-cookie=${postCookies.size} ech=${postResp.echStatus}"
                     try { webView.loadDataWithBaseURL(site.url, postHtml, "text/html", "utf-8", null) } catch (_: Throwable) {}
                     extractCookie()
-                    // 后备：ECH的 302 clear 丢 remember_web，用直连 302 补抓
+                    // 后备：ECH的 302 clear 丢 remember_web，用新 token 直连 302 补抓
                     if (postCookies.none { it.contains("remember_web", true) } && (hit.contains("已登录") || hit.contains("200渲染"))) {
                         Thread {
                             try {
-                                log("后备直连POST补 remember_web ...")
+                                log("后备重取token直连补 remember_web ...")
+                                // 重新 ECH GET 拿新 token/XSRF，避免复用已消耗 token 导致 419
+                                val freshHeaders = mutableMapOf(
+                                    "User-Agent" to "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36",
+                                    "Accept" to "text/html,application/xhtml+xml",
+                                )
+                                val curCk = try { CookieManager.getInstance().getCookie("https://${site.host}/").orEmpty() } catch (_: Exception) { "" }
+                                if (curCk.isNotBlank()) freshHeaders["Cookie"] = curCk
+                                val freshResp = EchHttpClient.execute("GET", site.url, freshHeaders, null, dohFor(site.host), dohResolve())
+                                val freshCookies = freshResp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
+                                runOnUiThreadCapture { syncCookiesToWebView(site, freshCookies) }
+                                val freshHtml = freshResp.body.toString(Charsets.UTF_8)
+                                val freshToken = Regex("""name="_token"\s+value="([^"]+)"""").find(freshHtml)?.groupValues?.get(1)
+                                    ?: Regex("""name='_token'\s+value='([^']+)'"""").find(freshHtml)?.groupValues?.get(1)
+                                if (freshToken.isNullOrBlank()) { runOnUiThread { log("后备 fresh token 未找到") }; return@Thread }
+                                val freshCk = try { CookieManager.getInstance().getCookie("https://${site.host}/").orEmpty() } catch (_: Exception) { "" }
+                                val freshXsrfRaw = freshCk.split(";").map { it.trim() }.firstOrNull { it.startsWith("XSRF-TOKEN=") }?.substringAfter("=") ?: ""
+                                val freshXsrf = try { URLDecoder.decode(freshXsrfRaw, "UTF-8") } catch (_: Exception) { freshXsrfRaw }
+                                val freshBody = "_token=${URLEncoder.encode(freshToken,"UTF-8")}&email=${URLEncoder.encode(email,"UTF-8")}&password=${URLEncoder.encode(password,"UTF-8")}&remember=1"
+                                log("后备 fresh token=${freshToken.take(6)}*** CookieLen=${freshCk.length}")
                                 val dUrl = java.net.URL(site.url)
                                 val dConn = (dUrl.openConnection() as java.net.HttpURLConnection).apply {
                                     requestMethod = "POST"; doOutput = true; instanceFollowRedirects = false
-                                    setRequestProperty("User-Agent", postHeaders["User-Agent"])
+                                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36")
                                     setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
                                     setRequestProperty("Accept", "text/html,application/xhtml+xml")
                                     setRequestProperty("Origin", "https://${site.host}")
                                     setRequestProperty("Referer", site.url)
-                                    if (ck.isNotBlank()) setRequestProperty("Cookie", ck)
-                                    postHeaders["X-XSRF-TOKEN"]?.let { setRequestProperty("X-XSRF-TOKEN", it) }
-                                    postHeaders["X-CSRF-TOKEN"]?.let { setRequestProperty("X-CSRF-TOKEN", it) }
+                                    if (freshCk.isNotBlank()) setRequestProperty("Cookie", freshCk)
+                                    if (freshXsrf.isNotBlank()) { setRequestProperty("X-XSRF-TOKEN", freshXsrf); setRequestProperty("X-CSRF-TOKEN", freshToken) }
                                     connectTimeout = 15000; readTimeout = 15000
                                 }
-                                dConn.outputStream.use { it.write(body.toByteArray()) }
+                                dConn.outputStream.use { it.write(freshBody.toByteArray()) }
                                 val dCode = dConn.responseCode
                                 val dLoc = dConn.getHeaderField("Location") ?: ""
                                 val dCookies = dConn.headerFields.entries.filter { it.key?.equals("set-cookie", true)==true }.flatMap { it.value }
