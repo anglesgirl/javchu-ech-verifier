@@ -105,10 +105,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun dohFor(host: String): String = when {
-        host.contains("hanime1") -> "https://1.1.1.1/dns-query"
-        host.contains("javchu") -> "https://1.1.1.1/dns-query"
+        host.contains("hanime1") -> "https://82sew1c85i.cloudflare-gateway.com/dns-query"
+        host.contains("javchu") -> "https://82sew1c85i.cloudflare-gateway.com/dns-query"
         else -> "https://1.1.1.1/dns-query"
     }
+    private fun dohResolve(): String = "82sew1c85i.cloudflare-gateway.com:443:162.159.36.20,162.159.36.5,2606:4700:54::a29f:2407,2606:4700:5c::a29f:2e07"
 
     private fun echLoad() {
         val site = currentSite()
@@ -123,7 +124,7 @@ class MainActivity : AppCompatActivity() {
                     "Accept-Language" to "zh-CN,zh;q=0.9",
                 )
                 if (initialCk.isNotBlank()) headers["Cookie"] = initialCk
-                val resp = EchHttpClient.execute("GET", site.url, headers, null, dohFor(site.host), "")
+                val resp = EchHttpClient.execute("GET", site.url, headers, null, dohFor(site.host), dohResolve())
                 val setCookies = resp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
                 val html = resp.body.toString(Charsets.UTF_8)
                 lastHtml = html
@@ -225,7 +226,7 @@ class MainActivity : AppCompatActivity() {
                     )
                     if (ckCopy.isNotBlank()) headers["Cookie"] = ckCopy
                     log("ECH POST $target bodyLen=${body.length}")
-                    val resp = EchHttpClient.execute("POST", target, headers, body.toByteArray(), dohFor(siteCopy.host), "")
+                    val resp = EchHttpClient.execute("POST", target, headers, body.toByteArray(), dohFor(siteCopy.host), dohResolve())
                     val setCookies = resp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
                     val html = resp.body.toString(Charsets.UTF_8)
                     val echOk = resp.echStatus.contains("accepted", true)
