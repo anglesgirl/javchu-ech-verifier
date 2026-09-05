@@ -1,5 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-<application android:label="javchu verifier" android:theme="@android:style/Theme.Material.Light">
+<application android:label="Cookie 提取器" android:theme="@android:style/Theme.Material.Light">
+<provider
+    android:name="androidx.core.content.FileProvider"
+    android:authorities="${applicationId}.fileProvider"
+    android:exported="false"
+    android:grantUriPermissions="true">
+    <meta-data
+        android:name="android.support.FILE_PROVIDER_PATHS"
+        android:resource="@xml/file_paths" />
+</provider>
 <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
 </application>
 </manifest>

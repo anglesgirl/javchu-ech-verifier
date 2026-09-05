@@ -190,6 +190,7 @@ android-jetpack = [
 com-android-application = { id = "com.android.application", version.ref = "androidGradle" }
 com-android-library = { id = "com.android.library", version.ref = "androidGradle" }
 com-google-devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+org-jetbrains-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 org-jetbrains-kotlin-plugin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "serializationPlugin" }
 org-jetbrains-kotlin-plugin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "kotlin" }
 com-google-gms-google-services = { id = "com.google.gms.google-services", version = "4.5.0" }

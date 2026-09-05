@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.com.android.application)
-    alias(libs.plugins.org.jetbrains.kotlin.android)
 }
 android {
     namespace = "com.test.verifier"
@@ -16,7 +15,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
     implementation("org.json:json:20240303")
