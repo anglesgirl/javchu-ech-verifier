@@ -147,7 +147,12 @@ class MainActivity : AppCompatActivity() {
                 }
             } catch (e: Throwable) {
                 e.printStackTrace()
-                runOnUiThread { preview.text = "ECH GET失败: ${e::class.simpleName}:${e.message}"; log("GET异常 ${e::class.simpleName}:${e.message}") }
+                val logs = try { EchHttpClient.logs().takeLast(20).joinToString("\n") } catch (_: Throwable) { "" }
+                runOnUiThread {
+                    preview.text = "ECH GET失败: ${e::class.simpleName}:${e.message}\n${logs.take(800)}"
+                    log("GET异常 ${e::class.simpleName}:${e.message}")
+                    if (logs.isNotBlank()) log("echLogs:\n$logs")
+                }
             }
         }.start()
     }
