@@ -235,11 +235,14 @@ class MainActivity : AppCompatActivity() {
                     val resp = EchHttpClient.execute("POST", target, headers, body.toByteArray(), dohFor(siteCopy.host), dohResolve())
                     val setCookies = resp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
                     val html = resp.body.toString(Charsets.UTF_8)
+                    val previewHtml = html.take(800).replace("\n"," ").take(800)
                     val echOk = resp.echStatus.contains("accepted", true)
                     val location = resp.headers.entries.firstOrNull { it.key.equals("location", true) }?.value?.firstOrNull().orEmpty()
                     runOnUiThread {
                         try { syncCookiesToWebView(siteCopy, setCookies) } catch (e: Throwable) { log("POST同步异常 ${e.message}") }
-                        log("POST ${resp.statusCode} ech=${resp.echStatus} loc=$location set-cookie=${setCookies.size}")
+                        log("POST ${resp.statusCode} ech=${resp.echStatus} loc=$location set-cookie=${setCookies.size} bodyLen=${body.length}")
+                        log("POST回包预览: $previewHtml")
+                        log("POST Set-Cookie: ${setCookies.joinToString(" | ") { it.take(120) }}")
                         if (!echOk) {
                             preview.text = "ECH POST未接受 fail-closed\n${resp.echStatus}"
                             return@runOnUiThread
