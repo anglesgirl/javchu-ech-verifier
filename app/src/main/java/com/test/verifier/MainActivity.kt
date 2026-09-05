@@ -105,11 +105,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun dohFor(host: String): String = when {
-        host.contains("hanime1") -> "https://82sew1c85i.cloudflare-gateway.com/dns-query"
-        host.contains("javchu") -> "https://82sew1c85i.cloudflare-gateway.com/dns-query"
-        else -> "https://1.1.1.1/dns-query"
+        host.contains("hanime1") -> "https://tgxjjdszvu.cloudflare-gateway.com/dns-query"
+        host.contains("javchu") -> "https://tgxjjdszvu.cloudflare-gateway.com/dns-query"
+        else -> "https://tgxjjdszvu.cloudflare-gateway.com/dns-query"
     }
-    private fun dohResolve(): String = "82sew1c85i.cloudflare-gateway.com:443:162.159.36.20,162.159.36.5,2606:4700:54::a29f:2407,2606:4700:5c::a29f:2e07"
+    private fun dohResolve(): String = "tgxjjdszvu.cloudflare-gateway.com:443:162.159.36.20,162.159.36.5,2606:4700:54::a29f:2407,2606:4700:5c::a29f:2e07"
 
     private fun echLoad() {
         val site = currentSite()
