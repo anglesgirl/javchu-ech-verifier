@@ -136,7 +136,7 @@ class MainActivity : AppCompatActivity() {
                 if (initCk.isNotBlank()) getHeaders["Cookie"] = initCk
                 val getResp = EchHttpClient.execute("GET", site.url, getHeaders, null, dohFor(site.host), dohResolve())
                 val getCookies = getResp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
-                runOnUiThread { try { syncCookiesToWebView(site, getCookies) } catch (_: Throwable) {} }
+                runOnUiThreadCapture { syncCookiesToWebView(site, getCookies) }
                 val html = getResp.body.toString(Charsets.UTF_8)
                 val token = Regex("""name="_token"\s+value="([^"]+)"""").find(html)?.groupValues?.get(1)
                     ?: Regex("""name='_token'\s+value='([^']+)'""").find(html)?.groupValues?.get(1)
