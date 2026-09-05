@@ -111,23 +111,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun echLoad() {
         val site = currentSite()
+        val initialCk = try { CookieManager.getInstance().getCookie(site.url).orEmpty() } catch (_: Exception) { "" }
         preview.text = "ECH GET ${site.url} ..."
+        log("ECH请求发起 ${site.url} isLoaded=${EchHttpClient.isLoaded} ckLen=${initialCk.length}")
         Thread {
             try {
-                val ck = CookieManager.getInstance().getCookie(site.url).orEmpty()
                 val headers = mutableMapOf(
                     "User-Agent" to "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36",
                     "Accept" to "text/html,application/xhtml+xml",
                     "Accept-Language" to "zh-CN,zh;q=0.9",
                 )
-                if (ck.isNotBlank()) headers["Cookie"] = ck
+                if (initialCk.isNotBlank()) headers["Cookie"] = initialCk
                 val resp = EchHttpClient.execute("GET", site.url, headers, null, dohFor(site.host), "")
                 val setCookies = resp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
-                syncCookiesToWebView(site, setCookies)
                 val html = resp.body.toString(Charsets.UTF_8)
                 lastHtml = html
                 val echOk = resp.echStatus.contains("accepted", true)
                 runOnUiThread {
+                    try {
+                        syncCookiesToWebView(site, setCookies)
+                    } catch (e: Throwable) { log("同步Cookie异常 ${e.message}") }
                     log("GET ${resp.statusCode} ech=${resp.echStatus} set-cookie=${setCookies.size} echOk=$echOk")
                     log("Set-Cookie: ${setCookies.take(3).joinToString(" | ") { it.take(80) }}")
                     if (!echOk) {
@@ -135,11 +138,14 @@ class MainActivity : AppCompatActivity() {
                         return@runOnUiThread
                     }
                     // 三方同步后渲染，不走WebView直连
-                    webView.loadDataWithBaseURL(site.url, html, "text/html", "utf-8", null)
+                    try {
+                        webView.loadDataWithBaseURL(site.url, html, "text/html", "utf-8", null)
+                    } catch (e: Throwable) { preview.text = "渲染失败 ${e.message}"; log("loadData异常 ${e.message}") ; return@runOnUiThread }
                     preview.text = "ECH加载完成已渲染(${html.length}字) ech=${resp.echStatus}\n请在下方完成登录/验证，提交会自动走ECH POST"
                 }
-            } catch (e: Exception) {
-                runOnUiThread { preview.text = "ECH GET失败: ${e.message}"; log("GET异常 ${e.message}") }
+            } catch (e: Throwable) {
+                e.printStackTrace()
+                runOnUiThread { preview.text = "ECH GET失败: ${e::class.simpleName}:${e.message}"; log("GET异常 ${e::class.simpleName}:${e.message}") }
             }
         }.start()
     }
@@ -195,53 +201,56 @@ class MainActivity : AppCompatActivity() {
     inner class EchBridge {
         @JavascriptInterface
         fun postLogin(json: String) {
+            // capture site on UI thread
+            val siteCopy = runOnUiThreadCapture { currentSite() } ?: return
+            val ckCopy = try { CookieManager.getInstance().getCookie("https://${siteCopy.host}/").orEmpty() } catch (_: Exception) { "" }
             runOnUiThread { log("拦截表单提交 $json".take(800)) }
             Thread {
                 try {
                     val obj = org.json.JSONObject(json)
-                    val url = obj.optString("url", currentSite().url)
+                    val url = obj.optString("url", siteCopy.url)
                     val body = obj.optString("body", "")
                     if (body.isBlank()) {
                         runOnUiThread { log("POST拦截body为空，忽略") }
                         return@Thread
                     }
-                    val site = currentSite()
-                    val target = if (url.startsWith("http")) url else "https://${site.host}" + if (url.startsWith("/")) url else "/$url"
-                    val ck = CookieManager.getInstance().getCookie("https://${site.host}/").orEmpty()
+                    val target = if (url.startsWith("http")) url else "https://${siteCopy.host}" + if (url.startsWith("/")) url else "/$url"
                     val headers = mutableMapOf(
                         "User-Agent" to "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36",
                         "Content-Type" to "application/x-www-form-urlencoded",
                         "Accept" to "text/html,application/xhtml+xml",
-                        "Origin" to "https://${site.host}",
-                        "Referer" to site.url,
+                        "Origin" to "https://${siteCopy.host}",
+                        "Referer" to siteCopy.url,
                     )
-                    if (ck.isNotBlank()) headers["Cookie"] = ck
+                    if (ckCopy.isNotBlank()) headers["Cookie"] = ckCopy
                     log("ECH POST $target bodyLen=${body.length}")
-                    val resp = EchHttpClient.execute("POST", target, headers, body.toByteArray(), dohFor(site.host), "")
+                    val resp = EchHttpClient.execute("POST", target, headers, body.toByteArray(), dohFor(siteCopy.host), "")
                     val setCookies = resp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
-                    syncCookiesToWebView(site, setCookies)
                     val html = resp.body.toString(Charsets.UTF_8)
                     val echOk = resp.echStatus.contains("accepted", true)
                     val location = resp.headers.entries.firstOrNull { it.key.equals("location", true) }?.value?.firstOrNull().orEmpty()
                     runOnUiThread {
+                        try { syncCookiesToWebView(siteCopy, setCookies) } catch (e: Throwable) { log("POST同步异常 ${e.message}") }
                         log("POST ${resp.statusCode} ech=${resp.echStatus} loc=$location set-cookie=${setCookies.size}")
                         if (!echOk) {
                             preview.text = "ECH POST未接受 fail-closed\n${resp.echStatus}"
                             return@runOnUiThread
                         }
-                        if (resp.statusCode in 300..399 && location.isNotBlank()) {
-                            log("302跳转 $location")
-                            // 跟随跳转再渲染
-                            preview.text = "登录POST 302 → $location 已同步Cookie"
-                            webView.loadDataWithBaseURL(target, html, "text/html", "utf-8", null)
-                        } else {
-                            webView.loadDataWithBaseURL(target, html, "text/html", "utf-8", null)
-                            preview.text = "ECH POST完成 ${resp.statusCode} ech=${resp.echStatus}\n${if (html.contains("auth.failed") || html.contains("419")) "419/失败" else "已渲染"} set-cookie=${setCookies.size}"
-                        }
+                        try {
+                            if (resp.statusCode in 300..399 && location.isNotBlank()) {
+                                log("302跳转 $location")
+                                preview.text = "登录POST 302 → $location 已同步Cookie"
+                                webView.loadDataWithBaseURL(target, html, "text/html", "utf-8", null)
+                            } else {
+                                webView.loadDataWithBaseURL(target, html, "text/html", "utf-8", null)
+                                preview.text = "ECH POST完成 ${resp.statusCode} ech=${resp.echStatus}\n${if (html.contains("auth.failed") || html.contains("419")) "419/失败" else "已渲染"} set-cookie=${setCookies.size}"
+                            }
+                        } catch (e: Throwable) { log("POST渲染异常 ${e.message}") }
                         extractCookie()
                     }
-                } catch (e: Exception) {
-                    runOnUiThread { log("POST异常 ${e.message}") }
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                    runOnUiThread { log("POST异常 ${e::class.simpleName}:${e.message}") }
                 }
             }.start()
         }
@@ -292,8 +301,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun log(s: String) {
-        runOnUiThread { logView.text = (s + "\n" + logView.text).take(4000) }
-        EchHttpClient.addLog(s)
+        try { runOnUiThread { logView.text = (s + "\n" + logView.text).take(4000) } } catch (_: Throwable) {}
+        try { EchHttpClient.addLog(s) } catch (_: Throwable) {}
+    }
+
+    private fun <T> runOnUiThreadCapture(block: () -> T): T? {
+        var res: T? = null
+        val latch = java.util.concurrent.CountDownLatch(1)
+        runOnUiThread { try { res = block() } catch (_: Throwable) {} ; latch.countDown() }
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        return res
     }
 
     override fun onDestroy() { try{ webView.destroy()} catch(_:Exception){}; super.onDestroy() }
