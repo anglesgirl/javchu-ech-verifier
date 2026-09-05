@@ -150,6 +150,8 @@ class MainActivity : AppCompatActivity() {
                 val ck = try { CookieManager.getInstance().getCookie("https://${site.host}/").orEmpty() } catch (_: Exception) { "" }
                 // 2. ECH POST 直发
                 val body = "_token=${URLEncoder.encode(token,"UTF-8")}&email=${URLEncoder.encode(email,"UTF-8")}&password=${URLEncoder.encode(password,"UTF-8")}"
+                val xsrfRaw = ck.split(";").map { it.trim() }.firstOrNull { it.startsWith("XSRF-TOKEN=") }?.substringAfter("=") ?: ""
+                val xsrf = try { URLDecoder.decode(xsrfRaw, "UTF-8") } catch (_: Exception) { xsrfRaw }
                 val postHeaders = mutableMapOf(
                     "User-Agent" to "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36",
                     "Content-Type" to "application/x-www-form-urlencoded",
@@ -158,6 +160,10 @@ class MainActivity : AppCompatActivity() {
                     "Referer" to site.url,
                 )
                 if (ck.isNotBlank()) postHeaders["Cookie"] = ck
+                if (xsrf.isNotBlank()) {
+                    postHeaders["X-XSRF-TOKEN"] = xsrf
+                    postHeaders["X-CSRF-TOKEN"] = token
+                }
                 log("原生POST bodyLen=${body.length} CookieLen=${ck.length}")
                 val postResp = EchHttpClient.execute("POST", site.url, postHeaders, body.toByteArray(), dohFor(site.host), dohResolve())
                 val postCookies = postResp.headers.entries.filter { it.key.equals("set-cookie", true) }.flatMap { it.value }
