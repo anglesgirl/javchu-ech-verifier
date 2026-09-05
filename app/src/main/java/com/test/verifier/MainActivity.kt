@@ -186,6 +186,38 @@ class MainActivity : AppCompatActivity() {
                     preview.text = "原生POST ${postResp.statusCode} $hit set-cookie=${postCookies.size} ech=${postResp.echStatus}"
                     try { webView.loadDataWithBaseURL(site.url, postHtml, "text/html", "utf-8", null) } catch (_: Throwable) {}
                     extractCookie()
+                    // 后备：ECH的 302 clear 丢 remember_web，用直连 302 补抓
+                    if (postCookies.none { it.contains("remember_web", true) } && (hit.contains("已登录") || hit.contains("200渲染"))) {
+                        Thread {
+                            try {
+                                log("后备直连POST补 remember_web ...")
+                                val dUrl = java.net.URL(site.url)
+                                val dConn = (dUrl.openConnection() as java.net.HttpURLConnection).apply {
+                                    requestMethod = "POST"; doOutput = true; instanceFollowRedirects = false
+                                    setRequestProperty("User-Agent", postHeaders["User-Agent"])
+                                    setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+                                    setRequestProperty("Accept", "text/html,application/xhtml+xml")
+                                    setRequestProperty("Origin", "https://${site.host}")
+                                    setRequestProperty("Referer", site.url)
+                                    if (ck.isNotBlank()) setRequestProperty("Cookie", ck)
+                                    postHeaders["X-XSRF-TOKEN"]?.let { setRequestProperty("X-XSRF-TOKEN", it) }
+                                    postHeaders["X-CSRF-TOKEN"]?.let { setRequestProperty("X-CSRF-TOKEN", it) }
+                                    connectTimeout = 15000; readTimeout = 15000
+                                }
+                                dConn.outputStream.use { it.write(body.toByteArray()) }
+                                val dCode = dConn.responseCode
+                                val dLoc = dConn.getHeaderField("Location") ?: ""
+                                val dCookies = dConn.headerFields.entries.filter { it.key?.equals("set-cookie", true)==true }.flatMap { it.value }
+                                runOnUiThread {
+                                    try { syncCookiesToWebView(site, dCookies) } catch (_: Throwable) {}
+                                    log("后备直连POST $dCode loc=$dLoc set-cookie=${dCookies.size}")
+                                    log("后备 Set-Cookie: ${dCookies.joinToString(" | ") { it.take(120) }}")
+                                    extractCookie()
+                                    preview.text = "原生${postResp.statusCode} $hit +后备$dCode ${if (dCookies.any{it.contains("remember_web",true)}) "已补remember" else "仍缺remember"}"
+                                }
+                            } catch (e: Throwable) { runOnUiThread { log("后备异常 ${e.message}") } }
+                        }.start()
+                    }
                 }
             } catch (e: Throwable) {
                 e.printStackTrace()
