@@ -148,8 +148,8 @@ class MainActivity : AppCompatActivity() {
                 log("GET token=${token.take(8)}*** set-cookie=${getCookies.size} ech=${getResp.echStatus}")
                 // 同步后重读Cookie，保证 XSRF 与 token 同轮
                 val ck = try { CookieManager.getInstance().getCookie("https://${site.host}/").orEmpty() } catch (_: Exception) { "" }
-                // 2. ECH POST 直发
-                val body = "_token=${URLEncoder.encode(token,"UTF-8")}&email=${URLEncoder.encode(email,"UTF-8")}&password=${URLEncoder.encode(password,"UTF-8")}"
+                // 2. ECH POST 直发（带 remember=1 拿 remember_web）
+                val body = "_token=${URLEncoder.encode(token,"UTF-8")}&email=${URLEncoder.encode(email,"UTF-8")}&password=${URLEncoder.encode(password,"UTF-8")}&remember=1"
                 val xsrfRaw = ck.split(";").map { it.trim() }.firstOrNull { it.startsWith("XSRF-TOKEN=") }?.substringAfter("=") ?: ""
                 val xsrf = try { URLDecoder.decode(xsrfRaw, "UTF-8") } catch (_: Exception) { xsrfRaw }
                 val postHeaders = mutableMapOf(
@@ -170,13 +170,17 @@ class MainActivity : AppCompatActivity() {
                 val postHtml = postResp.body.toString(Charsets.UTF_8)
                 val lower = postHtml.lowercase()
                 val hit = when {
-                    lower.contains("page expired") || lower.contains("419") -> "419"
-                    lower.contains("登入") -> "仍在登录页"
-                    else -> "已登录或302"
+                    lower.contains("page expired") -> "419"
+                    lower.contains("auth.failed") || lower.contains("auth failed") -> "auth.failed"
+                    lower.contains("登入帳戶") || lower.contains("登入") && lower.contains("password") -> "仍在登录页"
+                    postCookies.any { it.contains("remember_web", true) } || postResp.statusCode in 300..399 -> "已登录302(remember)"
+                    postHtml.contains("登出") || postHtml.contains("logout", true) -> "已登录"
+                    else -> "200渲染(疑似已登录)"
                 }
                 runOnUiThread {
                     try { syncCookiesToWebView(site, postCookies) } catch (_: Throwable) {}
-                    log("原生POST ${postResp.statusCode} ech=${postResp.echStatus} set-cookie=${postCookies.size} 判定=$hit")
+                    val loc = postResp.headers.entries.firstOrNull { it.key.equals("location", true) }?.value?.firstOrNull().orEmpty()
+                    log("原生POST ${postResp.statusCode} ech=${postResp.echStatus} set-cookie=${postCookies.size} loc=${loc.take(80)} 判定=$hit")
                     log("原生POST Set-Cookie: ${postCookies.joinToString(" | ") { it.take(120) }}")
                     log("原生POST预览: ${postHtml.take(800).replace("\n"," ")}")
                     preview.text = "原生POST ${postResp.statusCode} $hit set-cookie=${postCookies.size} ech=${postResp.echStatus}"
